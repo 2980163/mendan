@@ -1,0 +1,329 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI音声練習アシスタント</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', 'Noto Sans JP', sans-serif;
+            background-color: #121212;
+            color: #E0E0E0;
+        }
+        .chat-bubble {
+            max-width: 75%;
+            padding: 12px 16px;
+            border-radius: 20px;
+            word-wrap: break-word;
+        }
+        .user-bubble {
+            background-color: #3B82F6;
+            color: white;
+            align-self: flex-end;
+            border-bottom-right-radius: 4px;
+        }
+        .assistant-bubble {
+            background-color: #374151;
+            color: #F3F4F6;
+            align-self: flex-start;
+            border-bottom-left-radius: 4px;
+        }
+        #recordButton.recording::after {
+            content: '';
+            position: absolute;
+            top: 0; left: 0; right: 0; bottom: 0;
+            border-radius: 9999px;
+            background-color: #EF4444;
+            animation: pulse 1.5s infinite;
+        }
+        @keyframes pulse {
+            0% { transform: scale(0.95); opacity: 0.7; }
+            70% { transform: scale(1.2); opacity: 0; }
+            100% { transform: scale(0.95); opacity: 0; }
+        }
+        .fade-in { animation: fadeIn 0.5s ease-in-out; }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        .mode-button {
+            background-color: #2563EB;
+            color: white;
+            padding: 24px 32px;
+            border-radius: 12px;
+            font-size: 1.25rem;
+            font-weight: 600;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+        .mode-button:hover {
+            background-color: #1D4ED8;
+            transform: translateY(-2px);
+            box-shadow: 0 8px 12px rgba(0, 0, 0, 0.15);
+        }
+    </style>
+</head>
+<body class="flex items-center justify-center min-h-screen bg-gray-900 text-white p-4">
+
+    <!-- モード選択画面 -->
+    <div id="mode-selection" class="text-center">
+        <h1 class="text-3xl md:text-4xl font-bold mb-10 text-gray-100">練習メニューを選択してください</h1>
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <button data-mode="discussion" class="mode-button">ディスカッションの練習</button>
+            <button data-mode="brainstorming" class="mode-button">ブレーンストーミングの練習</button>
+            <button data-mode="ideation" class="mode-button">アイデア出しの練習</button>
+        </div>
+    </div>
+
+    <!-- チャットボット画面 (最初は非表示) -->
+    <div id="chatbot-container" class="w-full max-w-2xl mx-auto p-4 md:p-6 bg-gray-800 rounded-2xl shadow-2xl flex-col h-[90vh] hidden">
+        <header class="text-center pb-4 border-b border-gray-700">
+            <h1 id="chatbot-title" class="text-2xl font-bold text-gray-100">AIアシスタント</h1>
+            <p id="status" class="text-sm text-gray-400 mt-1">下のボタンを押して応答してください</p>
+        </header>
+        <div id="chat-container" class="flex-grow my-4 p-4 overflow-y-auto flex flex-col gap-4 bg-gray-900/50 rounded-lg"></div>
+        <div class="flex flex-col items-center pt-4 border-t border-gray-700">
+            <button id="recordButton" class="relative w-20 h-20 bg-blue-600 hover:bg-blue-700 transition-all duration-300 rounded-full flex items-center justify-center shadow-lg focus:outline-none focus:ring-4 focus:ring-blue-500/50">
+                <svg id="micIcon" class="w-10 h-10 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"></path></svg>
+            </button>
+        </div>
+    </div>
+
+    <script>
+        // --- 設定 ---
+        const OPENAI_API_KEY = "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";
+
+        // --- プロンプト定義 ---
+        const prompts = {
+            discussion: {
+                title: "ディスカッションの練習",
+                system: "あなたは高校3年生のディスカッション練習をサポートする先生です。生徒が論理的思考力と表現力を身につけることを目標とし、フレンドリーで支援的な雰囲気を作ります。\n基本方針\n- 高校生に適した語彙と表現を使用し、親しみやすく丁寧に対応する\n- 生徒の意見を否定せず、建設的な質問で思考を深める\n- 根拠に基づいた議論の重要性を教え、具体例を求める\n- 中立的な立場を保ち、特定の結論に誘導しない\n- 段階的に議論を深め、生徒の成長を促す\n会話の開始\n必ず以下のメッセージで会話を始めてください：\n「こんにちは！今日は一緒にディスカッションの練習をしましょう。今日はなにについて話し合いますか？」\nテーマが思い浮かばない場合は以下を提案：\n- 制服は必要かどうか\n- スマートフォンの使用時間について\n- アルバイトのメリット・デメリット\n- 環境問題への取り組み\n- SNSの影響について\n- 大学進学の意義\n- 部活動の在り方\n- 校則について\nディスカッションの進行（5段階）\n段階1: 意見表明\n生徒の基本的な考えや立場を自由に聞く。批判や評価は避ける。\n発言例：「[テーマ]について、まずはあなたの率直な考えを聞かせてください」\n段階2: 根拠の探求\n「なぜそう思うのですか？」「具体例はありますか？」で根拠を求める。\n発言例：「その考えに至った理由を教えてください。具体的な体験や事例があれば聞かせてください」\n段階3: 深掘りと具体化\n抽象的な概念を具体化し、詳細な議論へ発展させる。\n発言例：「それが実際に適用された場合、どのような影響が考えられますか？」\n段階4: 多角的視点の検討\n異なる立場や反対意見について考察を促す（最重要段階）。\n発言例：「反対の立場の人はどのような意見を持つでしょうか？その人たちの気持ちも考えてみませんか？」\n段階5: 統合と振り返り\n議論全体を整理し、学びを言語化してもらう。\n発言例：「今日の議論を通じて、あなたの考えに変化はありましたか？新しく気づいたことを教えてください」\n禁止事項\n- 政治的・宗教的偏見の押し付け\n- 個人攻撃や差別的発言の容認\n- 一方的な講義形式の会話\n- 生徒の意見の否定や批判\n- 特定の結論への誘導\n会話終了時\n- 議論の要点を簡潔にまとめる\n- 生徒の成長した点を具体的に褒める\n- 次回への改善提案を1-2点に絞って伝える\n- 「お疲れ様でした！また一緒に議論しましょう」で締めくくる\n上記の方針に従って、生徒が安心してディスカッションスキルを向上できるようサポートしてください。",
+                initialMessage: "こんにちは！今日は一緒にディスカッションの練習をしましょう。今日はなにについて話し合いますか？"
+            },
+            brainstorming: {
+                title: "ブレーンストーミングの練習",
+                system: "あなたは高校3年生のブレーンストーミング練習をサポートする先生です。生徒が創造的思考力と協働的な発想スキルを身につけることを目標とし、安心して自由にアイデアを出せる雰囲気を作ります。\n基本方針\n- 高校生に適した語彙と表現を使用し、親しみやすく励ましの言葉をかける\n- どんなアイデアも肯定的に受け止め、創造性を最大限に引き出す\n- ブレーンストーミングの4つの基本原則を徹底的に実践させる\n- 批判や評価は一切せず、常に「面白い！」「いいですね！」で反応する\n- 量を重視し、質の判断は後回しにする姿勢を徹底する\n会話の開始\n必ず以下のメッセージで会話を始めてください：\n「こんにちは！今日は一緒にブレーンストーミングの練習をしましょう。ブレーンストーミングは『みんなでたくさんのアイデアを出し合って、より良い解決策を見つける技法』です。どんな突拍子もないアイデアでも大歓迎！今日はどんなテーマでブレーンストーミングしてみたいですか？」\n4つの基本ルール\nテーマが決まったら、必ず以下の4つのルールを詳しく説明してから開始：\n1. 批判禁止ルール\n「ブレーンストーミング中は絶対に批判をしません。『でも』『しかし』『無理だよ』『変だよ』は禁止です。どんなアイデアも『いいですね』『面白い』『なるほど』で受け止めます。まずは思いついたことを何でも言ってみてください」\n2. 自由奔放ルール\n「常識や現実にとらわれず、自由に発送しましょう。突拍子もないアイデア、実現不可能に見えるアイデアも大歓迎です。『もしも魔法が使えたら』『お金が無限にあったら』という気持ちで考えてみてください」\n3. 質より量ルール\n「良いアイデアかどうかは後で判断します。今は『とにかくたくさん』を目指しましょう。目標は最低15個のアイデアを出すことです。思いついたらすぐに言ってください」\n4. 結合改善ルール\n「出てきたアイデア同士を組み合わせたり、発展させたりするのは大歓迎です。『それにプラスして』『それを応用すると』『それと○○を組み合わせると』という発想を大切にしましょう」\n禁止事項\n- ブレーンストーミング中のアイデアの批判や評価\n- 実現可能性を問う質問\n- 一つのアイデアに固執させること\n- 正解を求める誘導\n- 競争的な雰囲気作り\n会話終了時\n- 「今日は素晴らしいブレーンストーミングでした！」\n- 「○個ものアイデアが出て、とても充実した時間でしたね」\n- 出てきたアイデアの中から特に印象的だったものを2-3個取り上げて褒める\n- 「お疲れ様でした！また一緒にブレーンストーミングを楽しみましょう！」\n上記の方針に従って、生徒がブレーンストーミングの正しい技法を身につけられるようサポートしてください。",
+                initialMessage: "こんにちは！今日は一緒にブレーンストーミングの練習をしましょう。ブレーンストーミングは『みんなでたくさんのアイデアを出し合って、より良い解決策を見つける技法』です。どんな突拍子もないアイデアでも大歓迎！今日はどんなテーマでブレーンストーミングしてみたいですか？"
+            },
+            ideation: {
+                title: "アイデア出しの練習",
+                system: "あなたは高校3年生のアイデア出し練習をサポートする先生です。生徒が創造的思考力と自由な発想力を身につけることを目標とし、楽しく安心できる雰囲気を作りながら、アイデア創出の基本技術を教えます。\n基本方針\n- 高校生に適した語彙と表現を使用し、親しみやすく励ましの言葉をかける\n- どんなアイデアも肯定的に受け止め、創造性を最大限に引き出す\n- 批判や評価は一切せず、常に「面白い！」「いいですね！」で反応する\n- 量を重視し、質の判断は後回しにする姿勢を徹底する\n会話の開始\n必ず以下のメッセージで会話を始めてください：\n「こんにちは！今日は一緒にアイデア出しの練習をしましょう。アイデア出しは『正解のない自由な発想タイム』です。どんな突拍子もないアイデアでも大歓迎！今日はどんなテーマでアイデアを出してみたいですか？」\n4つの基本ルール\nテーマが決まったら、必ず以下の4つのルールを説明してから開始：\n1. 批判禁止ルール\n「どんなアイデアも批判しません！『無理だよ』『変だよ』は禁止です。すべてのアイデアを『面白い！』で受け止めます」\n2. 自由奔放ルール\n「常識なんて忘れましょう！突拍子もないアイデア、ばかばかしいアイデア大歓迎です」\n3. 質より量ルール\n「質より量です！たくさんのアイデアを目指しましょう。良いアイデアかどうかは後で考えます」\n4. 結合改善ルール\n「出てきたアイデア同士を組み合わせたり、発展させたりしてもOKです」\n禁止事項\n- アイデアの批判、否定、評価\n- 「それは無理」「現実的じゃない」などの発言\n- 正解を求める質問や誘導\n- 実現可能性を問う質問\n会話終了時\n- 「今日はたくさんの素晴らしいアイデアが出ましたね！」\n- 「アイデア出しは『正解のない自由な時間』だということを実感できましたか？」\n- 「お疲れ様でした！また一緒にアイデア出しを楽しみましょう！」\n上記の方針に従って、生徒が自由で創造的なアイデア出しを体験し、発想力を向上できるようサポートしてください。",
+                initialMessage: "こんにちは！今日は一緒にアイデア出しの練習をしましょう。アイデア出しは『正解のない自由な発想タイム』です。どんな突拍子もないアイデアでも大歓迎！今日はどんなテーマでアイデアを出してみたいですか？"
+            }
+        };
+
+        // --- DOM要素 ---
+        const modeSelectionContainer = document.getElementById('mode-selection');
+        const chatbotContainer = document.getElementById('chatbot-container');
+        const chatbotTitle = document.getElementById('chatbot-title');
+        const recordButton = document.getElementById('recordButton');
+        const statusElement = document.getElementById('status');
+        const chatContainer = document.getElementById('chat-container');
+        const micIcon = document.getElementById('micIcon');
+        
+        // --- 状態管理 ---
+        let isRecording = false;
+        let isMicPermissionGranted = false;
+        let conversationHistory = [];
+        let currentInitialMessage = "";
+
+        // --- Web Speech APIの準備 ---
+        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+        let recognition;
+
+        if (SpeechRecognition) {
+            recognition = new SpeechRecognition();
+            recognition.lang = 'ja-JP';
+            recognition.interimResults = false;
+            recognition.continuous = false;
+        } else {
+            // モード選択画面でエラーを表示
+            const heading = modeSelectionContainer.querySelector('h1');
+            heading.textContent = "エラー";
+            const grid = modeSelectionContainer.querySelector('.grid');
+            grid.innerHTML = "<p>お使いのブラウザは音声認識に対応していません。</p>";
+        }
+
+        // --- 初期化処理 ---
+        modeSelectionContainer.addEventListener('click', (e) => {
+            if (e.target.matches('.mode-button')) {
+                const mode = e.target.dataset.mode;
+                startChat(mode);
+            }
+        });
+
+        function startChat(mode) {
+            // UI切り替え
+            modeSelectionContainer.classList.add('hidden');
+            chatbotContainer.classList.remove('hidden');
+            chatbotContainer.classList.add('flex');
+
+            // 選択されたモードのプロンプトを設定
+            const selectedPrompt = prompts[mode];
+            chatbotTitle.textContent = selectedPrompt.title;
+            currentInitialMessage = selectedPrompt.initialMessage;
+
+            // 会話履歴を初期化
+            conversationHistory = [{ role: "system", content: selectedPrompt.system }];
+            
+            // 最初のメッセージを表示
+            addMessageToChat('assistant', currentInitialMessage);
+            conversationHistory.push({ role: 'assistant', content: currentInitialMessage });
+            statusElement.textContent = "ボタンを押してマイクの許可と会話開始";
+        }
+
+        // --- イベントリスナー ---
+        recordButton.addEventListener('click', async () => {
+            if (recordButton.disabled) return;
+            
+            if (!isMicPermissionGranted) {
+                await requestMicrophonePermissionAndPlayGreeting();
+                return;
+            }
+            
+            if (isRecording) {
+                recognition.stop();
+            } else {
+                startRecording();
+            }
+        });
+        
+        if (recognition) {
+            recognition.onstart = () => {
+                isRecording = true;
+                recordButton.classList.add('recording');
+                micIcon.innerHTML = `<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14" />`;
+                statusElement.textContent = "聞いています...";
+            };
+            recognition.onend = () => {
+                isRecording = false;
+                recordButton.classList.remove('recording');
+                micIcon.innerHTML = `<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"></path>`;
+                statusElement.textContent = "応答を待っています...";
+            };
+            recognition.onresult = async (event) => {
+                const transcript = event.results[0][0].transcript.trim();
+                if (transcript) {
+                    addMessageToChat('user', transcript);
+                    await getAIResponse(transcript);
+                }
+            };
+            recognition.onerror = (event) => {
+                console.error('Speech recognition error:', event.error);
+                 if (event.error === 'not-allowed') {
+                    statusElement.textContent = "マイクへのアクセスがブロックされました。";
+                    recordButton.disabled = true;
+                } else {
+                    statusElement.textContent = `エラーが発生しました: ${event.error}`;
+                }
+            };
+        }
+
+        // --- 関数 ---
+        async function requestMicrophonePermissionAndPlayGreeting() {
+            statusElement.textContent = "マイクの使用許可を待っています...";
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                stream.getTracks().forEach(track => track.stop());
+                isMicPermissionGranted = true;
+                await speakText(currentInitialMessage);
+
+            } catch (err) {
+                console.error('Microphone permission error:', err);
+                let errorMessage = "マイクへのアクセスが拒否されました。";
+                // Googleサイトなどのiframe内で実行された場合のエラーをより具体的に表示
+                if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
+                    errorMessage = "マイクへのアクセスが拒否されました。Googleサイトのような埋め込み環境では、セキュリティの都合でマイクが動作しないことがあります。このページを直接ブラウザで開いてお試しください。";
+                } else {
+                    errorMessage = `マイクを取得できませんでした: ${err.name}`;
+                }
+                statusElement.textContent = errorMessage;
+                addMessageToChat('assistant', `エラー: ${errorMessage}`);
+                recordButton.disabled = true;
+            }
+        }
+
+        function startRecording() {
+            if (!recognition) return;
+            try { recognition.start(); } 
+            catch (error) { console.error("Could not start recognition:", error); statusElement.textContent = "録音を開始できませんでした。"; }
+        }
+
+        function addMessageToChat(sender, text) {
+            const bubble = document.createElement('div');
+            bubble.className = `chat-bubble fade-in ${sender === 'user' ? 'user-bubble' : 'assistant-bubble'}`;
+            bubble.textContent = text;
+            chatContainer.appendChild(bubble);
+            chatContainer.scrollTop = chatContainer.scrollHeight;
+        }
+
+        async function getAIResponse(userText) {
+            statusElement.textContent = "AIが考えています...";
+            recordButton.disabled = true;
+            conversationHistory.push({ role: "user", content: userText });
+
+            try {
+                const chatResponse = await fetch('https://api.openai.com/v1/chat/completions', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${OPENAI_API_KEY}` },
+                    body: JSON.stringify({ model: 'gpt-4o-mini', messages: conversationHistory })
+                });
+                if (!chatResponse.ok) {
+                    const errorData = await chatResponse.json();
+                    throw new Error(`Chat API Error: ${chatResponse.status} ${errorData.error.message}`);
+                }
+                const chatData = await chatResponse.json();
+                const assistantResponseText = chatData.choices[0].message.content;
+                conversationHistory.push({ role: "assistant", content: assistantResponseText });
+                addMessageToChat('assistant', assistantResponseText);
+                await speakText(assistantResponseText);
+            } catch (error) {
+                console.error('Error getting AI response:', error);
+                let errorMessage = "AIの応答取得中にエラーが発生しました。";
+                if (error.message.includes('401')) {
+                    errorMessage = "APIキーが無効です。有効なOpenAI APIキーか確認してください。";
+                }
+                statusElement.textContent = errorMessage;
+                addMessageToChat('assistant', `エラー: ${errorMessage}`);
+                recordButton.disabled = false;
+            }
+        }
+
+        async function speakText(textToSpeak) {
+            statusElement.textContent = "AIが話しています...";
+            recordButton.disabled = true;
+            try {
+                const speechResponse = await fetch('https://api.openai.com/v1/audio/speech', {
+                    method: 'POST',
+                    headers: { 'Authorization': `Bearer ${OPENAI_API_KEY}`, 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ model: 'tts-1', input: textToSpeak, voice: 'alloy' })
+                });
+                if (!speechResponse.ok) {
+                    if (speechResponse.status === 401) throw new Error('TTS API Error: 401 Unauthorized');
+                    throw new Error(`TTS API Error: ${speechResponse.status}`);
+                }
+                const audioBlob = await speechResponse.blob();
+                const audioUrl = URL.createObjectURL(audioBlob);
+                const audio = new Audio(audioUrl);
+                // 再生速度を1.25倍に設定
+                audio.playbackRate = 1.25;
+                audio.onended = () => {
+                    recordButton.disabled = false;
+                    statusElement.textContent = "下のボタンを押して応答してください";
+                };
+                audio.play();
+            } catch (error) {
+                console.error('Error with TTS:', error);
+                let errorMessage = "音声の再生中にエラーが発生しました。";
+                if (error.message.includes('401')) {
+                    errorMessage = "APIキーが無効です。有効なOpenAI APIキーか確認してください。";
+                }
+                statusElement.textContent = errorMessage;
+                recordButton.disabled = false;
+            }
+        }
+    </script>
+</body>
+</html>
